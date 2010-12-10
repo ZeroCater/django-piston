@@ -160,10 +160,7 @@ class Resource(object):
         # don't want to pass these along to the handler.
         request = self.cleanup_request(request)
 
-        try:
-            result = meth(request, *args, **kwargs)
-        except Exception, e:
-            result = self.error_handler(e, request, meth, em_format)
+        result = meth(request, *args, **kwargs)
 
         try:
             emitter, ct = Emitter.get(em_format)
@@ -230,73 +227,3 @@ class Resource(object):
                 setattr(request, method_type, sanitized)
 
         return request
-
-    # --
-
-    def email_exception(self, reporter):
-        subject = "Piston crash report"
-        html = reporter.get_traceback_html()
-
-        message = EmailMessage(settings.EMAIL_SUBJECT_PREFIX+subject,
-                                html, settings.SERVER_EMAIL,
-                                [ admin[1] for admin in settings.ADMINS ])
-
-        message.content_subtype = 'html'
-        message.send(fail_silently=True)
-
-
-    def error_handler(self, e, request, meth, em_format):
-        """
-        Override this method to add handling of errors customized for your
-        needs
-        """
-        if isinstance(e, FormValidationError):
-            return self.form_validation_response(e)
-
-        elif isinstance(e, TypeError):
-            result = rc.BAD_REQUEST
-            hm = HandlerMethod(meth)
-            sig = hm.signature
-
-            msg = 'Method signature does not match.\n\n'
-
-            if sig:
-                msg += 'Signature should be: %s' % sig
-            else:
-                msg += 'Resource does not expect any parameters.'
-
-            if self.display_errors:
-                msg += '\n\nException was: %s' % str(e)
-
-            result.content = format_error(msg)
-            return result
-        elif isinstance(e, Http404):
-            return rc.NOT_FOUND
-
-        elif isinstance(e, HttpStatusCode):
-            return e.response
-
-        else:
-            """
-            On errors (like code errors), we'd like to be able to
-            give crash reports to both admins and also the calling
-            user. There's two setting parameters for this:
-
-            Parameters::
-             - `PISTON_EMAIL_ERRORS`: Will send a Django formatted
-               error email to people in `settings.ADMINS`.
-             - `PISTON_DISPLAY_ERRORS`: Will return a simple traceback
-               to the caller, so he can tell you what error they got.
-
-            If `PISTON_DISPLAY_ERRORS` is not enabled, the caller will
-            receive a basic "500 Internal Server Error" message.
-            """
-            exc_type, exc_value, tb = sys.exc_info()
-            rep = ExceptionReporter(request, exc_type, exc_value, tb.tb_next)
-            if self.email_errors:
-                self.email_exception(rep)
-            if self.display_errors:
-                return HttpResponseServerError(
-                    format_error('\n'.join(rep.format_exception())))
-            else:
-                raise
